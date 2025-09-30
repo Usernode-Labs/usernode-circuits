@@ -1,0 +1,228 @@
+{
+  "error_types": {
+    "17843811134343075018": {
+      "error_kind": "string",
+      "string": "Stack too deep"
+    },
+    "285656119219400463": {
+      "error_kind": "string",
+      "string": "Field failed to decompose into specified 32 limbs"
+    },
+    "2920182694213909827": {
+      "error_kind": "string",
+      "string": "attempt to subtract with overflow"
+    },
+    "5019202896831570965": {
+      "error_kind": "string",
+      "string": "attempt to add with overflow"
+    },
+    "6485997221020871071": {
+      "error_kind": "string",
+      "string": "call to assert_max_bit_size"
+    }
+  },
+  "parameters": [
+    {
+      "name": "input",
+      "type": {
+        "fields": [
+          {
+            "name": "schnorr",
+            "type": {
+              "fields": [
+                {
+                  "name": "pk_x",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "pk_y",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "sig64",
+                  "type": {
+                    "kind": "array",
+                    "length": 64,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                },
+                {
+                  "name": "msg32",
+                  "type": {
+                    "kind": "array",
+                    "length": 32,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 8
+                    }
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "Schnorr"
+            }
+          },
+          {
+            "name": "in0",
+            "type": {
+              "fields": [
+                {
+                  "name": "assets_tokens",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "assets_amounts",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "recipient_pk_x",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "salt",
+                  "type": {
+                    "kind": "field"
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "Utxo"
+            }
+          },
+          {
+            "name": "in1",
+            "type": {
+              "fields": [
+                {
+                  "name": "assets_tokens",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "assets_amounts",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "recipient_pk_x",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "salt",
+                  "type": {
+                    "kind": "field"
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "Utxo"
+            }
+          },
+          {
+            "name": "out",
+            "type": {
+              "fields": [
+                {
+                  "name": "assets_tokens",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "assets_amounts",
+                  "type": {
+                    "kind": "array",
+                    "length": 4,
+                    "type": {
+                      "kind": "integer",
+                      "sign": "unsigned",
+                      "width": 64
+                    }
+                  }
+                },
+                {
+                  "name": "recipient_pk_x",
+                  "type": {
+                    "kind": "field"
+                  }
+                },
+                {
+                  "name": "salt",
+                  "type": {
+                    "kind": "field"
+                  }
+                }
+              ],
+              "kind": "struct",
+              "path": "Utxo"
+            }
+          }
+        ],
+        "kind": "struct",
+        "path": "MergeInput"
+      },
+      "visibility": "private"
+    },
+    {
+      "name": "public_inputs",
+      "type": {
+        "kind": "array",
+        "length": 1,
+        "type": {
+          "kind": "field"
+        }
+      },
+      "visibility": "public"
+    }
+  ],
+  "return_type": null
+}

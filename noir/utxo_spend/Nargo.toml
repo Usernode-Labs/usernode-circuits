@@ -1,0 +1,9 @@
+[package]
+name = "utxo_spend"
+type = "bin"
+authors = ["Usernode Labs"]
+compiler_version = ">=0.30.0"
+
+[dependencies]
+# External Noir libraries needed by this circuit
+schnorr = { git = "https://github.com/noir-lang/schnorr", tag = "v0.1.3" }

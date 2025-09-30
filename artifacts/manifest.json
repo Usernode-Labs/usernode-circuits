@@ -1,0 +1,19 @@
+{
+  "circuits": [
+    {
+      "abi": "utxo_spend.abi.json",
+      "acir": "utxo_spend.acir",
+      "name": "utxo_spend",
+      "sha256": "f11953e76cb97ec0ba501aaf620c7a3d00f8b289620eb35803ea430cc0ac85ed",
+      "vk": "utxo_spend.vk"
+    },
+    {
+      "abi": "utxo_merge.abi.json",
+      "acir": "utxo_merge.acir",
+      "name": "utxo_merge",
+      "sha256": "858ef4edb16d035fa208fd3878fcbd093e3b99102100048636ba4e55d00c3b64",
+      "vk": "utxo_merge.vk"
+    }
+  ],
+  "version": 0
+}
