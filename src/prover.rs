@@ -10,8 +10,8 @@ use acvm::pwg::{ACVM, ACVMStatus};
 use anyhow::Context;
 use aztec_barretenberg_rs::BarretenbergBlackBoxSolver;
 use aztec_barretenberg_rs::{
-    acvm_exec, batch_merge_h2, merge_mega, prove_mega_honk, set_crs_path, verify_mega_honk,
-    write_vk_mega_honk,
+    acvm_exec, batch_merge_h2, compile_mega, mega_vk_hash, merge_mega, prove_with_id, set_crs_path,
+    verify_with_id, write_vk_mega_honk,
 };
 
 use crate::bn254;
@@ -51,6 +51,36 @@ pub fn get_circuit(name: &str) -> Option<CircuitEntry> {
     catalog::get(name)
 }
 
+pub fn get_key_id(name: &str) -> anyhow::Result<[u8; 32]> {
+    get_circuit(name)
+        .map(|entry| entry.key_id)
+        .ok_or_else(|| anyhow::anyhow!("circuit not initialized"))
+}
+
+pub fn get_vk_bytes(name: &str) -> anyhow::Result<Vec<u8>> {
+    let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
+    if ent.vk.is_empty() {
+        regenerate_vk(name)
+    } else {
+        Ok(ent.vk)
+    }
+}
+
+pub fn get_vk_hash(name: &str) -> anyhow::Result<[u8; 32]> {
+    let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
+    if let Some(hash) = ent.vk_hash {
+        return Ok(hash);
+    }
+    let vk = if ent.vk.is_empty() {
+        regenerate_vk(name)?
+    } else {
+        ent.vk
+    };
+    let hash = mega_vk_hash(&vk)?;
+    catalog::update_vk(name, &vk, Some(hash), None);
+    Ok(hash)
+}
+
 pub fn init_circuit_from_artifacts(
     name: &str,
     acir: &[u8],
@@ -60,33 +90,51 @@ pub fn init_circuit_from_artifacts(
     ensure_crs();
     let abi: Abi =
         serde_json::from_str(abi_json).with_context(|| format!("parsing ABI for {name}"))?;
+    let key_id = compile_mega(acir).with_context(|| format!("compile_mega for {name}"))?;
+    let mut vk_vec = vk.to_vec();
+    if vk_vec.is_empty() {
+        let generated = {
+            let _g = bb_lock();
+            write_vk_mega_honk(acir)
+        }?;
+        vk_vec = generated.0;
+    }
+    let vk_hash = if vk_vec.is_empty() {
+        None
+    } else {
+        Some(mega_vk_hash(&vk_vec)?)
+    };
     catalog::insert(CircuitEntry {
         name: name.to_string(),
         acir: acir.to_vec(),
-        vk: vk.to_vec(),
+        vk: vk_vec,
         abi,
+        key_id,
+        vk_hash,
     });
     Ok(())
 }
 
 pub fn regenerate_vk(name: &str) -> anyhow::Result<Vec<u8>> {
     let entry = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
-    let vk = {
+    let (vk, key_id) = {
         let _guard = bb_lock();
-        write_vk_mega_honk(&entry.acir)
-    }?;
-    catalog::update_vk(name, &vk.0);
+        let id = compile_mega(&entry.acir)?;
+        let vk = write_vk_mega_honk(&entry.acir)?;
+        (vk, id)
+    };
+    let vk_hash = aztec_barretenberg_rs::mega_vk_hash(&vk.0)?;
+    catalog::update_vk(name, &vk.0, Some(vk_hash), Some(key_id));
     Ok(vk.0)
 }
 
 pub fn prove(name: &str, private_inputs: &[FieldElement]) -> anyhow::Result<Vec<u8>> {
     let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, private_inputs)?;
-    let (proof, vk_from_prove) = {
+    let proof = {
         let _g = bb_lock();
-        prove_mega_honk(&ent.acir, &witness.0)
+        prove_with_id(&ent.key_id, &witness.0)
     }?;
-    catalog::update_vk(name, &vk_from_prove.0);
     Ok(proof.0)
 }
 
@@ -172,11 +220,10 @@ pub fn prove_with_priv_and_pub(
     use std::io::Read;
     dec.read_to_end(&mut witness_bytes)
         .map_err(|_| anyhow::anyhow!("gunzip witness stack"))?;
-    let (proof, vk_from_prove) = {
+    let proof = {
         let _g = bb_lock();
-        prove_mega_honk(&ent.acir, &witness_bytes)
+        prove_with_id(&ent.key_id, &witness_bytes)
     }?;
-    catalog::update_vk(name, &vk_from_prove.0);
     Ok(proof.0)
 }
 
@@ -184,7 +231,7 @@ pub fn verify(name: &str, proof: &[u8]) -> anyhow::Result<bool> {
     let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
     let ok = {
         let _g = bb_lock();
-        verify_mega_honk(proof, &ent.vk)
+        verify_with_id(&ent.key_id, proof)
     }?;
     Ok(ok)
 }
@@ -199,7 +246,17 @@ pub fn merge_proofs_by_name(
         get_circuit(left_name).ok_or_else(|| anyhow::anyhow!("left circuit not initialized"))?;
     let right =
         get_circuit(right_name).ok_or_else(|| anyhow::anyhow!("right circuit not initialized"))?;
-    let (proof, vk) = merge_mega(left_proof, &left.vk, right_proof, &right.vk)?;
+    let left_vk = if left.vk.is_empty() {
+        get_vk_bytes(left_name)?
+    } else {
+        left.vk
+    };
+    let right_vk = if right.vk.is_empty() {
+        get_vk_bytes(right_name)?
+    } else {
+        right.vk
+    };
+    let (proof, vk) = merge_mega(left_proof, &left_vk, right_proof, &right_vk)?;
     Ok((proof.0, vk.0))
 }
 
@@ -213,7 +270,17 @@ pub fn merge_batch_h2_by_name(
         get_circuit(left_name).ok_or_else(|| anyhow::anyhow!("left circuit not initialized"))?;
     let right =
         get_circuit(right_name).ok_or_else(|| anyhow::anyhow!("right circuit not initialized"))?;
-    let (proof, vk) = batch_merge_h2(left_proof, &left.vk, right_proof, &right.vk)?;
+    let left_vk = if left.vk.is_empty() {
+        get_vk_bytes(left_name)?
+    } else {
+        left.vk
+    };
+    let right_vk = if right.vk.is_empty() {
+        get_vk_bytes(right_name)?
+    } else {
+        right.vk
+    };
+    let (proof, vk) = batch_merge_h2(left_proof, &left_vk, right_proof, &right_vk)?;
     Ok((proof.0, vk.0))
 }
 
@@ -471,11 +538,10 @@ pub fn prove_with_abi(
     }
 
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, &private_inputs)?;
-    let (proof, vk_from_prove) = {
+    let proof = {
         let _g = bb_lock();
-        prove_mega_honk(&ent.acir, &witness.0)
+        prove_with_id(&ent.key_id, &witness.0)
     }?;
-    catalog::update_vk(name, &vk_from_prove.0);
     Ok(proof.0)
 }
 
@@ -552,10 +618,9 @@ pub fn prove_with_all_inputs(
     }
 
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, &all_inputs)?;
-    let (proof, vk_from_prove) = {
+    let proof = {
         let _g = bb_lock();
-        prove_mega_honk(&ent.acir, &witness.0)
+        prove_with_id(&ent.key_id, &witness.0)
     }?;
-    catalog::update_vk(name, &vk_from_prove.0);
     Ok(proof.0)
 }

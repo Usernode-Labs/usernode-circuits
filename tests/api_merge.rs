@@ -3,13 +3,19 @@
 //! The scenario mirrors the wallet flow: create witnesses, call `prove_merge`,
 //! and inspect the returned metadata/commitment before verifying the proof.
 
+mod common;
+
+use common::serial_guard;
 use usernode_circuits::bn254::Field;
+use usernode_circuits::catalog;
 use usernode_circuits::keys::Keypair;
 use usernode_circuits::tx::{MergeRequest, prove_merge};
 use usernode_circuits::types::{Asset, TransactionOutput, Utxo, UtxoInclusionWitness};
 
 #[test]
 fn merge_prove_matches_commitment() {
+    let _guard = serial_guard();
+    catalog::clear();
     usernode_circuits::init_default_circuits().expect("init embedded circuits");
 
     let signer = Keypair::from_seed([5u8; 32]).expect("derive keypair");
@@ -70,4 +76,5 @@ fn merge_prove_matches_commitment() {
 
     // Validate the generated proof against the embedded verification key.
     assert!(usernode_circuits::verify("utxo_merge", &tx.proof).expect("verify"));
+    catalog::clear();
 }

@@ -20,8 +20,8 @@ binprot = { git = "https://github.com/Usernode-Labs/binprot-rs", rev = "400b52c"
 bincode = "1"
 dirs = "5"
 flate2 = "1"
-aztec-barretenberg-rs = { git = "https://github.com/Usernode-Labs/aztec-packages", tag = "bb-v0.1.2", package = "aztec-barretenberg-rs" }
-aztec-barretenberg-sys-rs = { git = "https://github.com/Usernode-Labs/aztec-packages", tag = "bb-v0.1.2", package = "aztec-barretenberg-sys-rs" }
+aztec-barretenberg-rs = { git = "https://github.com/Usernode-Labs/aztec-packages", tag = "bb-v1.1.3", package = "aztec-barretenberg-rs" }
+aztec-barretenberg-sys-rs = { git = "https://github.com/Usernode-Labs/aztec-packages", tag = "bb-v1.1.3", package = "aztec-barretenberg-sys-rs" }
 rand = "0.8"
 array-init = "2"
 

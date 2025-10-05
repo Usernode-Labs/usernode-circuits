@@ -11,6 +11,8 @@ pub struct CircuitEntry {
     pub acir: Vec<u8>,
     pub vk: Vec<u8>,
     pub abi: Abi,
+    pub key_id: [u8; 32],
+    pub vk_hash: Option<[u8; 32]>,
 }
 
 static CACHE: OnceLock<Mutex<HashMap<String, CircuitEntry>>> = OnceLock::new();
@@ -31,11 +33,17 @@ pub fn insert(entry: CircuitEntry) {
     cache().lock().unwrap().insert(entry.name.clone(), entry);
 }
 
-pub fn update_vk(name: &str, vk: &[u8]) {
-    if let Some(entry) = cache().lock().unwrap().get_mut(name)
-        && entry.vk.is_empty()
-    {
-        entry.vk = vk.to_vec();
+pub fn update_vk(name: &str, vk: &[u8], vk_hash: Option<[u8; 32]>, key_id: Option<[u8; 32]>) {
+    if let Some(entry) = cache().lock().unwrap().get_mut(name) {
+        if entry.vk.is_empty() || entry.vk != vk {
+            entry.vk = vk.to_vec();
+        }
+        if entry.vk_hash != vk_hash {
+            entry.vk_hash = vk_hash;
+        }
+        if let Some(id) = key_id {
+            entry.key_id = id;
+        }
     }
 }
 
@@ -47,11 +55,24 @@ pub fn init_embedded() -> anyhow::Result<()> {
     for embed in artifacts::embedded() {
         let abi: Abi = serde_json::from_str(embed.abi_json)
             .with_context(|| format!("parsing ABI for {}", embed.name))?;
+        let key_id = aztec_barretenberg_rs::compile_mega(embed.acir)
+            .with_context(|| format!("compile_mega for {}", embed.name))?;
+        let vk_vec = embed.vk.to_vec();
+        let vk_hash = if vk_vec.is_empty() {
+            None
+        } else {
+            Some(
+                aztec_barretenberg_rs::mega_vk_hash(&vk_vec)
+                    .with_context(|| format!("vk hash for {}", embed.name))?,
+            )
+        };
         insert(CircuitEntry {
             name: embed.name.to_string(),
             acir: embed.acir.to_vec(),
-            vk: embed.vk.to_vec(),
+            vk: vk_vec,
             abi,
+            key_id,
+            vk_hash,
         });
     }
     Ok(())

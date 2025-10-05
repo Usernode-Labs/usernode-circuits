@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+
+use std::sync::{Mutex, OnceLock};
+
 use aztec_barretenberg_rs::{
     grumpkin_derive_pubkey, mega_proof_fields_hash, mega_public_inputs, mega_vk_hash,
     schnorr_blake2s_sign, schnorr_blake2s_verify_xy,
@@ -5,6 +9,15 @@ use aztec_barretenberg_rs::{
 
 use usernode_circuits::bn254::Field;
 use usernode_circuits::poseidon2::{hash_fields, hash10};
+
+fn guard() -> &'static Mutex<()> {
+    static TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    TEST_GUARD.get_or_init(|| Mutex::new(()))
+}
+
+pub fn serial_guard() -> std::sync::MutexGuard<'static, ()> {
+    guard().lock().expect("test mutex poisoned")
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Asset {

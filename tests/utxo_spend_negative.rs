@@ -1,8 +1,9 @@
 mod common;
 
-use common::{Asset, Keypair, Utxo, spend_digest, utxo_commitment};
+use common::{Asset, Keypair, Utxo, serial_guard, spend_digest, utxo_commitment};
 
 use usernode_circuits::bn254::Field;
+use usernode_circuits::catalog;
 use usernode_circuits::prover::{
     SchnorrEnc, SpendInputEnc, TransferEnc, UtxoEnc, encode_spend_privates, init_default_circuits,
     prove,
@@ -129,6 +130,8 @@ fn expect_prove_err(enc: &SpendInputEnc) {
 
 #[test]
 fn bad_signature_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([1u8; 32]);
@@ -166,10 +169,13 @@ fn bad_signature_rejected() {
 
     enc.schnorr.sig64 = attacker.sign(msg32);
     expect_prove_err(&enc);
+    catalog::clear();
 }
 
 #[test]
 fn bad_msg32_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([4u8; 32]);
@@ -208,10 +214,13 @@ fn bad_msg32_rejected() {
     enc.schnorr.msg32 = msg32;
     enc.schnorr.sig64 = sender.sign(msg32);
     expect_prove_err(&enc);
+    catalog::clear();
 }
 
 #[test]
 fn transfer_token_not_present_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([6u8; 32]);
@@ -259,10 +268,13 @@ fn transfer_token_not_present_rejected() {
 
     enc.schnorr.sig64 = sender.sign(msg32);
     expect_prove_err(&enc);
+    catalog::clear();
 }
 
 #[test]
 fn insufficient_fee_slot0_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([8u8; 32]);
@@ -294,4 +306,5 @@ fn insufficient_fee_slot0_rejected() {
 
     enc.schnorr.sig64 = sender.sign(msg32);
     expect_prove_err(&enc);
+    catalog::clear();
 }

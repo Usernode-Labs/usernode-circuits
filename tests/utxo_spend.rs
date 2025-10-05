@@ -1,8 +1,9 @@
 mod common;
 
-use common::{Asset, Keypair, Utxo, spend_digest, utxo_commitment};
+use common::{Asset, Keypair, Utxo, serial_guard, spend_digest, utxo_commitment};
 
 use usernode_circuits::bn254::Field;
+use usernode_circuits::catalog;
 use usernode_circuits::prover::{
     SchnorrEnc, SpendInputEnc, TransferEnc, UtxoEnc, encode_spend_privates, get_circuit,
     init_default_circuits, prove, verify,
@@ -10,6 +11,8 @@ use usernode_circuits::prover::{
 
 #[test]
 fn prove_and_verify_utxo_spend() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([7u8; 32]);
@@ -160,4 +163,5 @@ fn prove_and_verify_utxo_spend() {
     let circuit = get_circuit("utxo_spend").expect("circuit present");
     let pis = common::fetch_public_inputs(&proof, &circuit.vk);
     assert_eq!(pis.len(), 32, "expected single public input");
+    catalog::clear();
 }

@@ -1,8 +1,9 @@
 mod common;
 
-use common::{Asset, Keypair, Utxo, merge_digest, utxo_commitment};
+use common::{Asset, Keypair, Utxo, merge_digest, serial_guard, utxo_commitment};
 
 use usernode_circuits::bn254::Field;
+use usernode_circuits::catalog;
 use usernode_circuits::prover::{
     MergeInputEnc, SchnorrEnc, UtxoEnc, encode_merge_privates, init_default_circuits, prove,
 };
@@ -85,77 +86,90 @@ fn expect_merge_err(enc: &MergeInputEnc) {
     assert!(result.is_err(), "expected proving failure");
 }
 
+fn with_serialized_catalog<F: FnOnce()>(f: F) {
+    let _guard = serial_guard();
+    catalog::clear();
+    f();
+    catalog::clear();
+}
+
 #[test]
 fn bad_signature_rejected() {
-    init_default_circuits().expect("init embedded circuits");
+    with_serialized_catalog(|| {
+        init_default_circuits().expect("init embedded circuits");
 
-    let sender = Keypair::from_seed([1u8; 32]);
-    let attacker = Keypair::from_seed([2u8; 32]);
+        let sender = Keypair::from_seed([1u8; 32]);
+        let attacker = Keypair::from_seed([2u8; 32]);
 
-    let in_tokens = [Field::from(7), Field::zero(), Field::zero(), Field::zero()];
-    let in0_amounts = [Field::from(40), Field::zero(), Field::zero(), Field::zero()];
-    let in1_amounts = [Field::from(60), Field::zero(), Field::zero(), Field::zero()];
-    let out_amounts = [
-        Field::from(100),
-        Field::zero(),
-        Field::zero(),
-        Field::zero(),
-    ];
+        let in_tokens = [Field::from(7), Field::zero(), Field::zero(), Field::zero()];
+        let in0_amounts = [Field::from(40), Field::zero(), Field::zero(), Field::zero()];
+        let in1_amounts = [Field::from(60), Field::zero(), Field::zero(), Field::zero()];
+        let out_amounts = [
+            Field::from(100),
+            Field::zero(),
+            Field::zero(),
+            Field::zero(),
+        ];
 
-    let (mut enc, msg32) = build_merge_inputs(
-        &sender,
-        in_tokens,
-        in0_amounts,
-        Field::from(11u128),
-        in_tokens,
-        in1_amounts,
-        Field::from(22u128),
-        in_tokens,
-        out_amounts,
-        Field::from(33u128),
-    );
+        let (mut enc, msg32) = build_merge_inputs(
+            &sender,
+            in_tokens,
+            in0_amounts,
+            Field::from(11u128),
+            in_tokens,
+            in1_amounts,
+            Field::from(22u128),
+            in_tokens,
+            out_amounts,
+            Field::from(33u128),
+        );
 
-    enc.schnorr.sig64 = attacker.sign(msg32);
-    expect_merge_err(&enc);
+        enc.schnorr.sig64 = attacker.sign(msg32);
+        expect_merge_err(&enc);
+    });
 }
 
 #[test]
 fn bad_msg32_rejected() {
-    init_default_circuits().expect("init embedded circuits");
+    with_serialized_catalog(|| {
+        init_default_circuits().expect("init embedded circuits");
 
-    let sender = Keypair::from_seed([3u8; 32]);
+        let sender = Keypair::from_seed([3u8; 32]);
 
-    let in_tokens = [Field::from(7), Field::zero(), Field::zero(), Field::zero()];
-    let in0_amounts = [Field::from(40), Field::zero(), Field::zero(), Field::zero()];
-    let in1_amounts = [Field::from(60), Field::zero(), Field::zero(), Field::zero()];
-    let out_amounts = [
-        Field::from(100),
-        Field::zero(),
-        Field::zero(),
-        Field::zero(),
-    ];
+        let in_tokens = [Field::from(7), Field::zero(), Field::zero(), Field::zero()];
+        let in0_amounts = [Field::from(40), Field::zero(), Field::zero(), Field::zero()];
+        let in1_amounts = [Field::from(60), Field::zero(), Field::zero(), Field::zero()];
+        let out_amounts = [
+            Field::from(100),
+            Field::zero(),
+            Field::zero(),
+            Field::zero(),
+        ];
 
-    let (mut enc, mut msg32) = build_merge_inputs(
-        &sender,
-        in_tokens,
-        in0_amounts,
-        Field::from(44u128),
-        in_tokens,
-        in1_amounts,
-        Field::from(55u128),
-        in_tokens,
-        out_amounts,
-        Field::from(66u128),
-    );
+        let (mut enc, mut msg32) = build_merge_inputs(
+            &sender,
+            in_tokens,
+            in0_amounts,
+            Field::from(44u128),
+            in_tokens,
+            in1_amounts,
+            Field::from(55u128),
+            in_tokens,
+            out_amounts,
+            Field::from(66u128),
+        );
 
-    msg32[0] ^= 0x42;
-    enc.schnorr.msg32 = msg32;
-    enc.schnorr.sig64 = sender.sign(msg32);
-    expect_merge_err(&enc);
+        msg32[0] ^= 0x42;
+        enc.schnorr.msg32 = msg32;
+        enc.schnorr.sig64 = sender.sign(msg32);
+        expect_merge_err(&enc);
+    });
 }
 
 #[test]
 fn mismatched_input_tokens_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([5u8; 32]);
@@ -212,10 +226,13 @@ fn mismatched_input_tokens_rejected() {
 
     enc.schnorr.sig64 = sender.sign(msg32);
     expect_merge_err(&enc);
+    catalog::clear();
 }
 
 #[test]
 fn output_not_sum_rejected() {
+    let _guard = serial_guard();
+    catalog::clear();
     init_default_circuits().expect("init embedded circuits");
 
     let sender = Keypair::from_seed([7u8; 32]);
@@ -240,4 +257,5 @@ fn output_not_sum_rejected() {
 
     enc.schnorr.sig64 = sender.sign(msg32);
     expect_merge_err(&enc);
+    catalog::clear();
 }

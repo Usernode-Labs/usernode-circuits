@@ -4,13 +4,19 @@
 //! packing, Barretenberg proving, and hash reconstruction without touching the
 //! wider node code base.
 
+mod common;
+
+use common::serial_guard;
 use usernode_circuits::bn254::Field;
+use usernode_circuits::catalog;
 use usernode_circuits::keys::Keypair;
 use usernode_circuits::tx::{SpendRequest, prove_spend};
 use usernode_circuits::types::{Asset, TransactionOutput, Utxo, UtxoInclusionWitness};
 
 #[test]
 fn spend_prove_matches_commitments() {
+    let _guard = serial_guard();
+    catalog::clear();
     usernode_circuits::init_default_circuits().expect("init embedded circuits");
 
     let signer = Keypair::from_seed([7u8; 32]).expect("derive keypair");
@@ -68,4 +74,6 @@ fn spend_prove_matches_commitments() {
     assert_eq!(tx.sender_pk_x.to_bytes(), signer.public_key_xonly());
     // Finally confirm the proof verifies against the embedded verification key.
     assert!(usernode_circuits::verify("utxo_spend", &tx.proof).expect("verify"));
+
+    catalog::clear();
 }

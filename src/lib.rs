@@ -14,10 +14,10 @@ pub mod types;
 
 pub use prover::{
     MergeInputEnc, SchnorrEnc, SpendInputEnc, TransferEnc, UtxoEnc, encode_merge_privates,
-    encode_spend_privates, get_circuit, init_circuit_from_artifacts, init_default_circuits,
-    init_embedded_catalog, merge_batch_h2, merge_batch_h2_by_name, merge_proofs_by_name, prove,
-    prove_with_abi, prove_with_all_inputs, prove_with_priv_and_pub, public_outputs, regenerate_vk,
-    verify,
+    encode_spend_privates, get_circuit, get_key_id, get_vk_bytes, get_vk_hash,
+    init_circuit_from_artifacts, init_default_circuits, init_embedded_catalog, merge_batch_h2,
+    merge_batch_h2_by_name, merge_proofs_by_name, prove, prove_with_abi, prove_with_all_inputs,
+    prove_with_priv_and_pub, public_outputs, regenerate_vk, verify,
 };
 
 pub use batch::{
