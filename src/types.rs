@@ -58,44 +58,78 @@ impl Utxo {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct UtxoCommitment(pub [u8; 32]);
+pub struct SchnorrPublicKey {
+    /// X-coordinate of the public key encoded as big-endian bytes.
+    pk_x: [u8; 32],
+    /// Y-coordinate of the public key encoded as big-endian bytes.
+    pk_y: [u8; 32],
+}
 
-impl UtxoCommitment {
-    /// Construct a raw commitment from a UTXO by hashing it.
-    pub fn compute(utxo: &Utxo) -> Self {
-        Self(utxo.commitment().to_bytes())
+impl SchnorrPublicKey {
+    /// Construct a Schnorr public key from its affine coordinates.
+    pub fn new(pk_x: [u8; 32], pk_y: [u8; 32]) -> Self {
+        Self { pk_x, pk_y }
+    }
+
+    /// Return the x-coordinate as raw bytes.
+    pub fn pk_x_bytes(&self) -> [u8; 32] {
+        self.pk_x
+    }
+
+    /// Return the y-coordinate as raw bytes.
+    pub fn pk_y_bytes(&self) -> [u8; 32] {
+        self.pk_y
+    }
+
+    /// Convert the x-coordinate into the BN254 field representation.
+    pub fn pk_x_field(&self) -> Field {
+        Field::from_bytes(self.pk_x)
+    }
+
+    /// Convert the y-coordinate into the BN254 field representation.
+    pub fn pk_y_field(&self) -> Field {
+        Field::from_bytes(self.pk_y)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MerklePathNode {
-    /// Sibling hash in the path.
-    pub sibling: Field,
-    /// Whether the sibling sits on the left-hand side.
-    pub is_left: bool,
-}
-
+/// Minimal spend input carried across the public API.
+///
+/// Merkle proofs and commitments are intentionally excluded – the circuits
+/// recompute commitments from the raw UTXO data, which keeps the API aligned
+/// with what Noir actually consumes today. Proof callers can reintroduce
+/// Merkle data when the circuits need it again.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UtxoInclusionWitness {
-    /// Commitment of the UTXO (matches the Merkle tree leaf).
-    pub commitment: UtxoCommitment,
-    /// Index of the leaf inside the tree.
-    pub index: u64,
-    /// Merkle authentication path from the leaf to the root.
-    pub path: Vec<MerklePathNode>,
-    /// Full UTXO payload (needed to compute private inputs).
+pub struct SpendInput {
+    /// UTXO being consumed by the spend proof.
     pub utxo: Utxo,
+    /// Public key that authorises the spend inside the circuit.
+    pub signer: SchnorrPublicKey,
 }
 
-impl UtxoInclusionWitness {
-    /// Convenience helper for tests that do not use an actual Merkle tree.
-    pub fn dummy(utxo: Utxo) -> Self {
-        Self {
-            commitment: UtxoCommitment::compute(&utxo),
-            index: 0,
-            path: Vec::new(),
-            utxo,
-        }
+impl SpendInput {
+    /// Convenience constructor mirroring the new façade.
+    pub fn new(utxo: Utxo, signer: SchnorrPublicKey) -> Self {
+        Self { utxo, signer }
+    }
+}
+
+/// Minimal merge input carried across the public API.
+///
+/// Just like `SpendInput`, this only exposes the data Noir reads today – the
+/// consumed UTXO payload along with the signer key. Merkle commitments can be
+/// layered back on when merge circuits require them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MergeInput {
+    /// UTXO being consumed by the merge proof.
+    pub utxo: Utxo,
+    /// Public key that authorises the merge inside the circuit.
+    pub signer: SchnorrPublicKey,
+}
+
+impl MergeInput {
+    /// Convenience constructor mirroring the new façade.
+    pub fn new(utxo: Utxo, signer: SchnorrPublicKey) -> Self {
+        Self { utxo, signer }
     }
 }
 
@@ -112,16 +146,14 @@ pub enum TransactionOutput {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpendTx {
-    /// Inclusion witness for the consumed UTXO.
-    pub input: UtxoInclusionWitness,
+    /// Input payload consumed by the spend proof.
+    pub input: SpendInput,
     /// Outputs reconstructed from the private inputs.
     pub outputs: TransactionOutput,
     /// Commitments expected by the circuit (receiver and remainder).
     pub expected_out_commits: [Field; 2],
     /// Barretenberg proof bytes.
     pub proof: Vec<u8>,
-    /// Public key x-coordinate used in the digest and Schnorr verification.
-    pub sender_pk_x: Field,
     /// Token being transferred.
     pub transfer_token: Field,
     /// Amount being transferred to the receiver.
@@ -144,7 +176,7 @@ impl SpendTx {
                 receiver: _,
                 remainder: _,
             } => hash_spend_leaf(
-                Field::from_bytes(self.input.commitment.0),
+                self.input.utxo.commitment(),
                 self.expected_out_commits[0],
                 self.expected_out_commits[1],
                 self.transfer_token,
@@ -160,16 +192,14 @@ impl SpendTx {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MergeTx {
-    /// Inclusion witnesses for both consumed UTXOs.
-    pub inputs: [UtxoInclusionWitness; 2],
+    /// Input payloads consumed by the merge proof.
+    pub inputs: [MergeInput; 2],
     /// Output reconstructed from the private inputs.
     pub outputs: TransactionOutput,
     /// Commitment expected by the merge circuit.
     pub expected_out_commit: Field,
     /// Barretenberg proof bytes.
     pub proof: Vec<u8>,
-    /// Public key x-coordinate used in the digest and Schnorr verification.
-    pub sender_pk_x: Field,
     /// Schnorr signature produced by the signer.
     pub signature: [u8; 64],
     /// Canonical 32-byte message hashed inside the circuit.
@@ -183,8 +213,8 @@ impl MergeTx {
     pub fn leaf_hash(&self) -> Field {
         match &self.outputs {
             TransactionOutput::Merge { utxo: _ } => hash_merge_leaf(
-                Field::from_bytes(self.inputs[0].commitment.0),
-                Field::from_bytes(self.inputs[1].commitment.0),
+                self.inputs[0].utxo.commitment(),
+                self.inputs[1].utxo.commitment(),
                 self.expected_out_commit,
             ),
             TransactionOutput::Spend { .. } => {

@@ -29,6 +29,6 @@ pub use tx::{
     MergeRequest, SpendRequest, merge_commitment, prove_merge, prove_spend, spend_commitments,
 };
 pub use types::{
-    Asset, MAX_ASSETS, MergeTx, MerklePathNode, SpendTx, TransactionOutput, Utxo, UtxoCommitment,
-    UtxoInclusionWitness, UtxoTransaction,
+    Asset, MAX_ASSETS, MergeInput, MergeTx, SchnorrPublicKey, SpendInput, SpendTx,
+    TransactionOutput, Utxo, UtxoTransaction,
 };

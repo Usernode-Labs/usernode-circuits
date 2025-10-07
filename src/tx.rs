@@ -21,7 +21,7 @@ use crate::bn254::Field;
 use crate::keys::Keypair;
 use crate::poseidon2::hash_fields;
 use crate::prover;
-use crate::types::{Asset, MergeTx, TransactionOutput, Utxo, UtxoInclusionWitness};
+use crate::types::{Asset, MergeInput, MergeTx, SpendInput, TransactionOutput, Utxo};
 
 const SPEND_CIRCUIT: &str = "utxo_spend";
 const MERGE_CIRCUIT: &str = "utxo_merge";
@@ -77,8 +77,8 @@ pub struct SpendRequest<'a> {
     pub signer: &'a Keypair,
     /// Receiver public key x-coordinate (the Noir circuit uses x-only keys).
     pub recipient_pk_x: [u8; 32],
-    /// Inclusion witness for the consumed UTXO.
-    pub input: UtxoInclusionWitness,
+    /// Input payload for the consumed UTXO.
+    pub input: SpendInput,
     /// Token to transfer to the receiver.
     pub transfer_token: Field,
     /// Amount to transfer to the receiver.
@@ -95,8 +95,8 @@ pub struct SpendRequest<'a> {
 pub struct MergeRequest<'a> {
     /// Schnorr keypair that authorises the transaction.
     pub signer: &'a Keypair,
-    /// Inclusion witnesses for the two input UTXOs.
-    pub inputs: [UtxoInclusionWitness; 2],
+    /// Input payloads for the two consumed UTXOs.
+    pub inputs: [MergeInput; 2],
     /// Token identifiers for the merged output.
     pub out_tokens: [Field; 4],
     /// Amounts for the merged output.
@@ -133,6 +133,15 @@ pub fn prove_spend(req: SpendRequest<'_>) -> anyhow::Result<crate::types::SpendT
     } = req;
 
     let (sender_pkx, sender_pky) = signer.public_key_xy();
+
+    anyhow::ensure!(
+        sender_pkx == input.signer.pk_x_bytes() && sender_pky == input.signer.pk_y_bytes(),
+        "signer keypair does not match spend input public key",
+    );
+    anyhow::ensure!(
+        input.utxo.recipient_pk_x == input.signer.pk_x_field(),
+        "spend input utxo recipient key does not match signer key",
+    );
 
     // Precompute input token/amount arrays
     let in_tokens = [
@@ -193,8 +202,8 @@ pub fn prove_spend(req: SpendRequest<'_>) -> anyhow::Result<crate::types::SpendT
 
     let prepared = loop {
         let pack = pack_spend_inputs(SpendInputs {
-            sender_pkx_be: sender_pkx,
-            sender_pky_be: sender_pky,
+            sender_pkx_be: input.signer.pk_x_bytes(),
+            sender_pky_be: input.signer.pk_y_bytes(),
             recipient_pkx_be: recipient_pk_x,
             in_tokens,
             in_amounts,
@@ -260,7 +269,6 @@ pub fn prove_spend(req: SpendRequest<'_>) -> anyhow::Result<crate::types::SpendT
         },
         expected_out_commits: [prepared.receiver_commit, prepared.remainder_commit],
         proof,
-        sender_pk_x: Field::from_bytes(sender_pkx),
         transfer_token,
         transfer_amount,
         fee_amount,
@@ -290,12 +298,31 @@ pub fn prove_merge(req: MergeRequest<'_>) -> anyhow::Result<MergeTx> {
 
     let (sender_pkx, sender_pky) = signer.public_key_xy();
 
+    anyhow::ensure!(
+        sender_pkx == inputs[0].signer.pk_x_bytes() && sender_pky == inputs[0].signer.pk_y_bytes(),
+        "signer keypair does not match merge input[0] public key",
+    );
+    anyhow::ensure!(
+        sender_pkx == inputs[1].signer.pk_x_bytes() && sender_pky == inputs[1].signer.pk_y_bytes(),
+        "signer keypair does not match merge input[1] public key",
+    );
+    anyhow::ensure!(
+        inputs[0].signer.pk_x_bytes() == inputs[1].signer.pk_x_bytes()
+            && inputs[0].signer.pk_y_bytes() == inputs[1].signer.pk_y_bytes(),
+        "merge inputs must share the same signer",
+    );
+    anyhow::ensure!(
+        inputs[0].utxo.recipient_pk_x == inputs[0].signer.pk_x_field()
+            && inputs[1].utxo.recipient_pk_x == inputs[1].signer.pk_x_field(),
+        "merge input utxo recipient key does not match signer key",
+    );
+
     let mut output_salt = out_salt.unwrap_or_else(random_salt_field);
 
     let prepared = loop {
         let pack = pack_merge_inputs(MergeInputs {
-            sender_pkx_be: sender_pkx,
-            sender_pky_be: sender_pky,
+            sender_pkx_be: inputs[0].signer.pk_x_bytes(),
+            sender_pky_be: inputs[0].signer.pk_y_bytes(),
             in0_tokens: array_init::array_init(|idx| inputs[0].utxo.assets[idx].token),
             in0_amounts: array_init::array_init(|idx| inputs[0].utxo.assets[idx].amount),
             in0_salt: inputs[0].utxo.salt,
@@ -344,7 +371,6 @@ pub fn prove_merge(req: MergeRequest<'_>) -> anyhow::Result<MergeTx> {
         outputs: TransactionOutput::Merge { utxo: merged_utxo },
         expected_out_commit: prepared.out_commit,
         proof,
-        sender_pk_x: Field::from_bytes(sender_pkx),
         signature,
         msg32: prepared.msg32,
         digest: prepared.digest,

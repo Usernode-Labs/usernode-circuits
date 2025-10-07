@@ -10,7 +10,7 @@ use usernode_circuits::bn254::Field;
 use usernode_circuits::catalog;
 use usernode_circuits::keys::Keypair;
 use usernode_circuits::tx::{MergeRequest, prove_merge};
-use usernode_circuits::types::{Asset, TransactionOutput, Utxo, UtxoInclusionWitness};
+use usernode_circuits::types::{Asset, MergeInput, SchnorrPublicKey, TransactionOutput, Utxo};
 
 #[test]
 fn merge_prove_matches_commitment() {
@@ -36,8 +36,10 @@ fn merge_prove_matches_commitment() {
 
     let in0 = utxo_from_input(60, 10);
     let in1 = utxo_from_input(40, 11);
-    let witness0 = UtxoInclusionWitness::dummy(in0);
-    let witness1 = UtxoInclusionWitness::dummy(in1);
+    let (signer_pk_x, signer_pk_y) = signer.public_key_xy();
+    let signer_pk = SchnorrPublicKey::new(signer_pk_x, signer_pk_y);
+    let witness0 = MergeInput::new(in0, signer_pk);
+    let witness1 = MergeInput::new(in1, signer_pk);
 
     let out_tokens = [
         Field::from(7u128),
