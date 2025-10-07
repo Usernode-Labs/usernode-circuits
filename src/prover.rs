@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::env;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use acir::AcirField;
 use acir::FieldElement;
@@ -14,17 +14,9 @@ use aztec_barretenberg_rs::{
     verify_with_id, write_vk_mega_honk,
 };
 
+use crate::barretenberg::with_bb_lock;
 use crate::bn254;
 use crate::catalog::{self, Abi, AbiType, CircuitEntry};
-
-static BB_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn bb_lock() -> std::sync::MutexGuard<'static, ()> {
-    BB_GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("barretenberg mutex poisoned")
-}
 
 fn ensure_crs() {
     static CRS_INIT: OnceLock<()> = OnceLock::new();
@@ -37,9 +29,18 @@ fn ensure_crs() {
     });
 }
 
+static EMBEDDED_INIT: OnceLock<anyhow::Result<Vec<CircuitEntry>>> = OnceLock::new();
+
 pub fn init_embedded_catalog() -> anyhow::Result<()> {
     ensure_crs();
-    catalog::init_embedded()
+    let result = EMBEDDED_INIT.get_or_init(catalog::init_embedded);
+    match result {
+        Ok(entries) => {
+            catalog::hydrate(entries);
+            Ok(())
+        }
+        Err(err) => Err(anyhow::Error::msg(err.to_string())),
+    }
 }
 
 pub fn insert_circuit(entry: CircuitEntry) {
@@ -90,13 +91,11 @@ pub fn init_circuit_from_artifacts(
     ensure_crs();
     let abi: Abi =
         serde_json::from_str(abi_json).with_context(|| format!("parsing ABI for {name}"))?;
-    let key_id = compile_mega(acir).with_context(|| format!("compile_mega for {name}"))?;
+    let key_id =
+        with_bb_lock(|| compile_mega(acir)).with_context(|| format!("compile_mega for {name}"))?;
     let mut vk_vec = vk.to_vec();
     if vk_vec.is_empty() {
-        let generated = {
-            let _g = bb_lock();
-            write_vk_mega_honk(acir)
-        }?;
+        let generated = with_bb_lock(|| write_vk_mega_honk(acir))?;
         vk_vec = generated.0;
     }
     let vk_hash = if vk_vec.is_empty() {
@@ -117,12 +116,11 @@ pub fn init_circuit_from_artifacts(
 
 pub fn regenerate_vk(name: &str) -> anyhow::Result<Vec<u8>> {
     let entry = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
-    let (vk, key_id) = {
-        let _guard = bb_lock();
+    let (vk, key_id) = with_bb_lock(|| {
         let id = compile_mega(&entry.acir)?;
         let vk = write_vk_mega_honk(&entry.acir)?;
-        (vk, id)
-    };
+        Ok::<_, anyhow::Error>((vk, id))
+    })?;
     let vk_hash = aztec_barretenberg_rs::mega_vk_hash(&vk.0)?;
     catalog::update_vk(name, &vk.0, Some(vk_hash), Some(key_id));
     Ok(vk.0)
@@ -131,10 +129,7 @@ pub fn regenerate_vk(name: &str) -> anyhow::Result<Vec<u8>> {
 pub fn prove(name: &str, private_inputs: &[FieldElement]) -> anyhow::Result<Vec<u8>> {
     let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, private_inputs)?;
-    let proof = {
-        let _g = bb_lock();
-        prove_with_id(&ent.key_id, &witness.0)
-    }?;
+    let proof = with_bb_lock(|| prove_with_id(&ent.key_id, &witness.0))?;
     Ok(proof.0)
 }
 
@@ -220,19 +215,13 @@ pub fn prove_with_priv_and_pub(
     use std::io::Read;
     dec.read_to_end(&mut witness_bytes)
         .map_err(|_| anyhow::anyhow!("gunzip witness stack"))?;
-    let proof = {
-        let _g = bb_lock();
-        prove_with_id(&ent.key_id, &witness_bytes)
-    }?;
+    let proof = with_bb_lock(|| prove_with_id(&ent.key_id, &witness_bytes))?;
     Ok(proof.0)
 }
 
 pub fn verify(name: &str, proof: &[u8]) -> anyhow::Result<bool> {
     let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
-    let ok = {
-        let _g = bb_lock();
-        verify_with_id(&ent.key_id, proof)
-    }?;
+    let ok = with_bb_lock(|| verify_with_id(&ent.key_id, proof))?;
     Ok(ok)
 }
 
@@ -538,10 +527,7 @@ pub fn prove_with_abi(
     }
 
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, &private_inputs)?;
-    let proof = {
-        let _g = bb_lock();
-        prove_with_id(&ent.key_id, &witness.0)
-    }?;
+    let proof = with_bb_lock(|| prove_with_id(&ent.key_id, &witness.0))?;
     Ok(proof.0)
 }
 
@@ -618,9 +604,6 @@ pub fn prove_with_all_inputs(
     }
 
     let witness = acvm_exec::compute_witness_from_private_inputs(&ent.acir, &all_inputs)?;
-    let proof = {
-        let _g = bb_lock();
-        prove_with_id(&ent.key_id, &witness.0)
-    }?;
+    let proof = with_bb_lock(|| prove_with_id(&ent.key_id, &witness.0))?;
     Ok(proof.0)
 }

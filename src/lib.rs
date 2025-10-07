@@ -3,6 +3,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod artifacts;
+mod barretenberg;
 pub mod batch;
 pub mod bn254;
 pub mod catalog;

@@ -4,6 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use anyhow::Context;
 
 use crate::artifacts;
+use crate::barretenberg::with_bb_lock;
 
 #[derive(Clone)]
 pub struct CircuitEntry {
@@ -51,11 +52,20 @@ pub fn clear() {
     cache().lock().unwrap().clear();
 }
 
-pub fn init_embedded() -> anyhow::Result<()> {
+pub fn hydrate(entries: &[CircuitEntry]) {
+    let mut cache = cache().lock().unwrap();
+    for entry in entries {
+        cache.insert(entry.name.clone(), entry.clone());
+    }
+}
+
+pub fn init_embedded() -> anyhow::Result<Vec<CircuitEntry>> {
+    let mut entries = Vec::new();
+    let mut cache_guard = cache().lock().unwrap();
     for embed in artifacts::embedded() {
         let abi: Abi = serde_json::from_str(embed.abi_json)
             .with_context(|| format!("parsing ABI for {}", embed.name))?;
-        let key_id = aztec_barretenberg_rs::compile_mega(embed.acir)
+        let key_id = with_bb_lock(|| aztec_barretenberg_rs::compile_mega(embed.acir))
             .with_context(|| format!("compile_mega for {}", embed.name))?;
         let vk_vec = embed.vk.to_vec();
         let vk_hash = if vk_vec.is_empty() {
@@ -66,16 +76,18 @@ pub fn init_embedded() -> anyhow::Result<()> {
                     .with_context(|| format!("vk hash for {}", embed.name))?,
             )
         };
-        insert(CircuitEntry {
+        let entry = CircuitEntry {
             name: embed.name.to_string(),
             acir: embed.acir.to_vec(),
             vk: vk_vec,
             abi,
             key_id,
             vk_hash,
-        });
+        };
+        cache_guard.insert(entry.name.clone(), entry.clone());
+        entries.push(entry);
     }
-    Ok(())
+    Ok(entries)
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
