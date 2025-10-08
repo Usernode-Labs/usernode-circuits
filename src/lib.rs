@@ -6,6 +6,7 @@ pub mod artifacts;
 mod barretenberg;
 pub mod batch;
 pub mod bn254;
+pub mod field;
 pub mod catalog;
 pub mod keys;
 pub mod poseidon2;
@@ -13,6 +14,7 @@ pub mod prover;
 pub mod tx;
 pub mod types;
 
+pub use field::CircuitFieldElement;
 pub use prover::{
     MergeInputEnc, SchnorrEnc, SpendInputEnc, TransferEnc, UtxoEnc, encode_merge_privates,
     encode_spend_privates, get_circuit, get_key_id, get_vk_bytes, get_vk_hash,
