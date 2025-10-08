@@ -17,9 +17,45 @@ pub struct CircuitEntry {
 }
 
 static CACHE: OnceLock<Mutex<HashMap<String, CircuitEntry>>> = OnceLock::new();
+static VK_CACHE: OnceLock<Mutex<HashMap<[u8; 32], VkEntry>>> = OnceLock::new();
 
 fn cache() -> &'static Mutex<HashMap<String, CircuitEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn vk_cache() -> &'static Mutex<HashMap<[u8; 32], VkEntry>> {
+    VK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone)]
+pub struct VkEntry {
+    pub bytes: Vec<u8>,
+    pub hash: Option<[u8; 32]>,
+}
+
+pub fn upsert_vk_entry(id: [u8; 32], bytes: Vec<u8>, hash: Option<[u8; 32]>) {
+    let mut guard = vk_cache().lock().unwrap();
+    guard.insert(id, VkEntry { bytes, hash });
+}
+
+pub fn remove_vk_entry(id: &[u8; 32]) {
+    let mut guard = vk_cache().lock().unwrap();
+    guard.remove(id);
+}
+
+pub fn get_vk_entry_by_id(id: &[u8; 32]) -> Option<VkEntry> {
+    vk_cache().lock().unwrap().get(id).cloned()
+}
+
+pub fn upsert_vk_hash(id: [u8; 32], hash: [u8; 32]) {
+    let mut guard = vk_cache().lock().unwrap();
+    guard
+        .entry(id)
+        .and_modify(|entry| entry.hash = Some(hash))
+        .or_insert_with(|| VkEntry {
+            bytes: Vec::new(),
+            hash: Some(hash),
+        });
 }
 
 pub fn all_loaded() -> Vec<String> {
@@ -31,6 +67,11 @@ pub fn get(name: &str) -> Option<CircuitEntry> {
 }
 
 pub fn insert(entry: CircuitEntry) {
+    if entry.vk.is_empty() {
+        remove_vk_entry(&entry.key_id);
+    } else {
+        upsert_vk_entry(entry.key_id, entry.vk.clone(), entry.vk_hash);
+    }
     cache().lock().unwrap().insert(entry.name.clone(), entry);
 }
 
@@ -45,16 +86,27 @@ pub fn update_vk(name: &str, vk: &[u8], vk_hash: Option<[u8; 32]>, key_id: Optio
         if let Some(id) = key_id {
             entry.key_id = id;
         }
+        if entry.vk.is_empty() {
+            remove_vk_entry(&entry.key_id);
+        } else {
+            upsert_vk_entry(entry.key_id, entry.vk.clone(), entry.vk_hash);
+        }
     }
 }
 
 pub fn clear() {
     cache().lock().unwrap().clear();
+    vk_cache().lock().unwrap().clear();
 }
 
 pub fn hydrate(entries: &[CircuitEntry]) {
     let mut cache = cache().lock().unwrap();
     for entry in entries {
+        if entry.vk.is_empty() {
+            remove_vk_entry(&entry.key_id);
+        } else {
+            upsert_vk_entry(entry.key_id, entry.vk.clone(), entry.vk_hash);
+        }
         cache.insert(entry.name.clone(), entry.clone());
     }
 }
@@ -84,6 +136,11 @@ pub fn init_embedded() -> anyhow::Result<Vec<CircuitEntry>> {
             key_id,
             vk_hash,
         };
+        if entry.vk.is_empty() {
+            remove_vk_entry(&entry.key_id);
+        } else {
+            upsert_vk_entry(entry.key_id, entry.vk.clone(), entry.vk_hash);
+        }
         cache_guard.insert(entry.name.clone(), entry.clone());
         entries.push(entry);
     }

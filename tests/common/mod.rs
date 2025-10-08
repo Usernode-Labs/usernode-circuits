@@ -3,12 +3,13 @@
 use std::sync::{Mutex, OnceLock};
 
 use aztec_barretenberg_rs::{
-    grumpkin_derive_pubkey, mega_proof_fields_hash, mega_public_inputs, mega_vk_hash,
-    schnorr_blake2s_sign, schnorr_blake2s_verify_xy,
+    grumpkin_derive_pubkey, mega_proof_fields_hash, mega_vk_hash, schnorr_blake2s_sign,
+    schnorr_blake2s_verify_xy,
 };
 
 use usernode_circuits::bn254::Field;
 use usernode_circuits::poseidon2::{hash_fields, hash10};
+use usernode_circuits::prover::fetch_batch_public_inputs;
 
 fn guard() -> &'static Mutex<()> {
     static TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -128,8 +129,8 @@ pub fn field_to_bytes(field: Field) -> [u8; 32] {
 }
 
 #[allow(dead_code)]
-pub fn fetch_public_inputs(proof: &[u8], vk: &[u8]) -> Vec<u8> {
-    mega_public_inputs(proof, vk).expect("mega public inputs")
+pub fn fetch_public_inputs(proof: &[u8], vk_id: [u8; 32]) -> Vec<[u8; 32]> {
+    fetch_batch_public_inputs(proof, vk_id).expect("mega public inputs")
 }
 
 #[allow(dead_code)]

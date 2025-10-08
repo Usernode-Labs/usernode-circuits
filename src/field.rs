@@ -14,5 +14,7 @@ pub fn from_bn254(field: &Field) -> CircuitFieldElement {
 }
 
 pub fn to_be_bytes(fe: CircuitFieldElement) -> [u8; 32] {
-    fe.to_be_bytes().try_into().expect("acir field encodes to 32 bytes")
+    fe.to_be_bytes()
+        .try_into()
+        .expect("acir field encodes to 32 bytes")
 }

@@ -161,7 +161,7 @@ fn prove_and_verify_utxo_spend() {
     assert!(verify("utxo_spend", &proof).expect("verify utxo_spend"));
 
     let circuit = get_circuit("utxo_spend").expect("circuit present");
-    let pis = common::fetch_public_inputs(&proof, &circuit.vk);
-    assert_eq!(pis.len(), 32, "expected single public input");
+    let pis = common::fetch_public_inputs(&proof, circuit.key_id);
+    assert_eq!(pis.len(), 1, "expected single public input");
     catalog::clear();
 }

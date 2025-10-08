@@ -55,10 +55,13 @@ fn helper_accessors_surface_cached_metadata() {
     let key_id = prover::get_key_id("utxo_spend").expect("key id");
     assert_ne!(key_id, [0u8; 32], "get_key_id should return non-zero id");
 
-    let vk = prover::get_vk_bytes("utxo_spend").expect("vk bytes");
-    assert!(!vk.is_empty(), "get_vk_bytes should return non-empty VK");
+    let vk = prover::get_vk_bytes_by_id(key_id).expect("vk bytes");
+    assert!(
+        !vk.is_empty(),
+        "get_vk_bytes_by_id should return non-empty VK"
+    );
 
-    let hash = prover::get_vk_hash("utxo_spend").expect("vk hash");
+    let hash = prover::get_vk_hash_by_id(key_id).expect("vk hash");
     assert_ne!(hash, [0u8; 32], "vk hash should not be zero");
 
     catalog::clear();
@@ -90,7 +93,7 @@ fn get_vk_hash_backfills_missing_cache() {
         vk_hash: None,
     });
 
-    let recomputed = prover::get_vk_hash(entry.name.as_str()).expect("recomputed hash");
+    let recomputed = prover::get_vk_hash_by_id(entry.key_id).expect("recomputed hash");
     assert_eq!(recomputed, cached_hash, "hash mismatch after recomputation");
 
     // Cache should now contain the hash again.
@@ -124,7 +127,7 @@ fn get_vk_bytes_regenerates_missing_vk() {
         vk_hash: None,
     });
 
-    let regenerated = prover::get_vk_bytes(entry.name.as_str()).expect("vk bytes");
+    let regenerated = prover::get_vk_bytes_by_id(entry.key_id).expect("vk bytes");
     assert!(
         !regenerated.is_empty(),
         "helper should regenerate verifying key"

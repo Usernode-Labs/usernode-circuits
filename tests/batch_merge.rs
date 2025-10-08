@@ -10,7 +10,7 @@ use usernode_circuits::catalog;
 use usernode_circuits::poseidon2::h2;
 use usernode_circuits::prover::{
     SchnorrEnc, SpendInputEnc, TransferEnc, UtxoEnc, encode_spend_privates, get_circuit,
-    get_vk_bytes, get_vk_hash, init_default_circuits, merge_batch_h2, merge_batch_h2_by_name,
+    get_key_id, get_vk_bytes_by_id, get_vk_hash_by_id, init_default_circuits, merge_batch_h2_by_id,
     prove, verify,
 };
 
@@ -166,47 +166,46 @@ fn batch_merge_binding_block_matches_expected() {
     let proof_a = prove_spend(Field::from(1111u128));
     let proof_b = prove_spend(Field::from(2223u128));
 
-    let vk_a = get_vk_bytes("utxo_spend").expect("vk bytes");
-    let vk_b = get_vk_bytes("utxo_spend").expect("vk bytes");
+    let vk_id = get_key_id("utxo_spend").expect("vk id");
 
-    let pis_a = fetch_public_inputs(&proof_a, &vk_a);
-    let pis_b = fetch_public_inputs(&proof_b, &vk_b);
+    let pis_a = fetch_public_inputs(&proof_a, vk_id);
+    let pis_b = fetch_public_inputs(&proof_b, vk_id);
     assert_eq!(
         pis_a.len(),
-        32,
+        1,
         "expected single public input for spend leaf"
     );
     assert_eq!(
         pis_b.len(),
-        32,
+        1,
         "expected single public input for spend leaf"
     );
 
-    let left = field_from_bytes(&pis_a[0..32]);
-    let right = field_from_bytes(&pis_b[0..32]);
+    let left = field_from_bytes(&pis_a[0]);
+    let right = field_from_bytes(&pis_b[0]);
     let parent_expect = h2(left, right);
 
     let pl_hash = proof_hash(&proof_a, 60);
     let pr_hash = proof_hash(&proof_b, 60);
-    let vkl_bytes = get_vk_hash("utxo_spend").expect("vk hash");
-    let vkr_bytes = get_vk_hash("utxo_spend").expect("vk hash");
+    let vkh_bytes = get_vk_hash_by_id(vk_id).expect("vk hash");
 
     let pl = field_from_bytes(&pl_hash);
     let pr = field_from_bytes(&pr_hash);
-    let vkl = field_from_bytes(&vkl_bytes);
-    let vkr = field_from_bytes(&vkr_bytes);
+    let vkl = field_from_bytes(&vkh_bytes);
+    let vkr = field_from_bytes(&vkh_bytes);
 
-    let (merged_proof, merged_vk) =
-        merge_batch_h2(&proof_a, &vk_a, &proof_b, &vk_b).expect("batch merge");
+    let (merged_proof, merged_vk_id) =
+        merge_batch_h2_by_id(vk_id, &proof_a, vk_id, &proof_b).expect("batch merge");
 
-    let pis_m = fetch_public_inputs(&merged_proof, &merged_vk);
-    assert_eq!(pis_m.len(), 7 * 32, "merged proof exposes binding block");
+    let pis_m = fetch_public_inputs(&merged_proof, merged_vk_id);
+    assert_eq!(pis_m.len(), 7, "merged proof exposes binding block");
 
     let read_field = |idx_from_end: usize| -> Field {
-        let words = pis_m.len() / 32;
-        let field_idx = words - idx_from_end;
-        let start = field_idx * 32;
-        field_from_bytes(&pis_m[start..start + 32])
+        let field_idx = pis_m
+            .len()
+            .checked_sub(idx_from_end)
+            .expect("index within public inputs");
+        field_from_bytes(&pis_m[field_idx])
     };
 
     let right_pub = read_field(1);
@@ -231,15 +230,16 @@ fn batch_merge_binding_block_matches_expected() {
 
     assert!(verify("utxo_spend", &proof_a).expect("verify proof A"));
     assert!(verify("utxo_spend", &proof_b).expect("verify proof B"));
-    let ok =
-        aztec_barretenberg_rs::verify_mega_honk(&merged_proof, &merged_vk).expect("verify merged");
+    let merged_vk_bytes = get_vk_bytes_by_id(merged_vk_id).expect("merged vk bytes");
+    let ok = aztec_barretenberg_rs::verify_mega_honk(&merged_proof, &merged_vk_bytes)
+        .expect("verify merged");
     assert!(ok, "merged proof must verify");
 
     catalog::clear();
 }
 
 #[test]
-fn merge_batch_by_name_regenerates_verifying_keys() {
+fn merge_batch_by_id_regenerates_verifying_keys() {
     let _lock = serial_guard();
     catalog::clear();
     init_default_circuits().expect("init embedded circuits");
@@ -390,13 +390,14 @@ fn merge_batch_by_name_regenerates_verifying_keys() {
     circuit.vk_hash = None;
     catalog::insert(circuit);
 
-    let (_merged_proof, merged_vk) =
-        merge_batch_h2_by_name("utxo_spend", &proof_a, "utxo_spend", &proof_b)
-            .expect("merge via helper");
+    let key_id = get_key_id("utxo_spend").expect("vk id");
 
-    assert!(
-        !merged_vk.is_empty(),
-        "merge helper should return regenerated verifying key"
+    let (_merged_proof, merged_vk_id) =
+        merge_batch_h2_by_id(key_id, &proof_a, key_id, &proof_b).expect("merge via helper");
+
+    assert_ne!(
+        merged_vk_id, [0u8; 32],
+        "merge helper should return verifying key id"
     );
     let refreshed = get_circuit("utxo_spend").expect("refreshed circuit");
     assert!(

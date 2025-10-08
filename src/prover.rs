@@ -10,8 +10,8 @@ use acvm::pwg::{ACVM, ACVMStatus};
 use anyhow::Context;
 use aztec_barretenberg_rs::BarretenbergBlackBoxSolver;
 use aztec_barretenberg_rs::{
-    acvm_exec, batch_merge_h2, compile_mega, mega_vk_hash, merge_mega, prove_with_id, set_crs_path,
-    verify_with_id, write_vk_mega_honk,
+    acvm_exec, batch_merge_h2, compile_mega, mega_public_inputs, mega_vk_hash, prove_with_id,
+    set_crs_path, verify_with_id, write_vk_mega_honk,
 };
 
 use crate::barretenberg::with_bb_lock;
@@ -58,28 +58,87 @@ pub fn get_key_id(name: &str) -> anyhow::Result<[u8; 32]> {
         .ok_or_else(|| anyhow::anyhow!("circuit not initialized"))
 }
 
-pub fn get_vk_bytes(name: &str) -> anyhow::Result<Vec<u8>> {
-    let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
-    if ent.vk.is_empty() {
-        regenerate_vk(name)
+pub fn get_vk_bytes_by_id(vk_id: [u8; 32]) -> anyhow::Result<Vec<u8>> {
+    ensure_crs();
+    if let Some(entry) = get_circuit_by_key_id(&vk_id) {
+        if entry.vk.is_empty() {
+            let vk = regenerate_vk(&entry.name)?;
+            let refreshed = get_circuit(&entry.name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "circuit {name} missing after regeneration",
+                    name = entry.name
+                )
+            })?;
+            anyhow::ensure!(
+                refreshed.key_id == vk_id,
+                "verifying key id changed after regeneration for {}",
+                entry.name
+            );
+            Ok(vk)
+        } else {
+            Ok(entry.vk)
+        }
+    } else if let Some(vk_entry) = catalog::get_vk_entry_by_id(&vk_id) {
+        anyhow::ensure!(
+            !vk_entry.bytes.is_empty(),
+            "verifying key bytes missing for id {}",
+            format_key_id(&vk_id)
+        );
+        Ok(vk_entry.bytes)
     } else {
-        Ok(ent.vk)
+        Err(anyhow::anyhow!(
+            "unknown verifying key id {}",
+            format_key_id(&vk_id)
+        ))
     }
 }
 
-pub fn get_vk_hash(name: &str) -> anyhow::Result<[u8; 32]> {
-    let ent = get_circuit(name).ok_or_else(|| anyhow::anyhow!("circuit not initialized"))?;
-    if let Some(hash) = ent.vk_hash {
+fn get_circuit_by_key_id(id: &[u8; 32]) -> Option<CircuitEntry> {
+    for name in catalog::all_loaded() {
+        if let Some(entry) = catalog::get(&name).filter(|entry| entry.key_id == *id) {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+fn format_key_id(id: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(id.len().saturating_mul(2));
+    for byte in id.iter() {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{:02x}", byte);
+    }
+    out
+}
+
+pub fn get_vk_hash_by_id(vk_id: [u8; 32]) -> anyhow::Result<[u8; 32]> {
+    ensure_crs();
+    if let Some(entry) = get_circuit_by_key_id(&vk_id) {
+        if let Some(hash) = entry.vk_hash {
+            return Ok(hash);
+        }
+        let vk_bytes = get_vk_bytes_by_id(vk_id)?;
+        let hash = mega_vk_hash(&vk_bytes)?;
+        catalog::update_vk(&entry.name, &vk_bytes, Some(hash), None);
         return Ok(hash);
     }
-    let vk = if ent.vk.is_empty() {
-        regenerate_vk(name)?
-    } else {
-        ent.vk
-    };
-    let hash = mega_vk_hash(&vk)?;
-    catalog::update_vk(name, &vk, Some(hash), None);
-    Ok(hash)
+    if let Some(vk_entry) = catalog::get_vk_entry_by_id(&vk_id) {
+        if let Some(hash) = vk_entry.hash {
+            return Ok(hash);
+        }
+        anyhow::ensure!(
+            !vk_entry.bytes.is_empty(),
+            "verifying key bytes missing for id {}",
+            format_key_id(&vk_id)
+        );
+        let hash = mega_vk_hash(&vk_entry.bytes)?;
+        catalog::upsert_vk_entry(vk_id, vk_entry.bytes, Some(hash));
+        return Ok(hash);
+    }
+    Err(anyhow::anyhow!(
+        "unknown verifying key id {}",
+        format_key_id(&vk_id)
+    ))
 }
 
 pub fn init_circuit_from_artifacts(
@@ -225,62 +284,45 @@ pub fn verify(name: &str, proof: &[u8]) -> anyhow::Result<bool> {
     Ok(ok)
 }
 
-pub fn merge_proofs_by_name(
-    left_name: &str,
+pub fn merge_batch_h2_by_id(
+    left_id: [u8; 32],
     left_proof: &[u8],
-    right_name: &str,
+    right_id: [u8; 32],
     right_proof: &[u8],
-) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let left =
-        get_circuit(left_name).ok_or_else(|| anyhow::anyhow!("left circuit not initialized"))?;
-    let right =
-        get_circuit(right_name).ok_or_else(|| anyhow::anyhow!("right circuit not initialized"))?;
-    let left_vk = if left.vk.is_empty() {
-        get_vk_bytes(left_name)?
-    } else {
-        left.vk
-    };
-    let right_vk = if right.vk.is_empty() {
-        get_vk_bytes(right_name)?
-    } else {
-        right.vk
-    };
-    let (proof, vk) = merge_mega(left_proof, &left_vk, right_proof, &right_vk)?;
-    Ok((proof.0, vk.0))
+) -> anyhow::Result<(Vec<u8>, [u8; 32])> {
+    ensure_crs();
+    let left_vk = get_vk_bytes_by_id(left_id)?;
+    let right_vk = get_vk_bytes_by_id(right_id)?;
+    let (proof, merged_vk) = batch_merge_h2(left_proof, &left_vk, right_proof, &right_vk)
+        .with_context(|| "batch merge h2 by id")?;
+    let merged_vk_bytes = merged_vk.0;
+    let merged_vk_id =
+        mega_vk_hash(&merged_vk_bytes).with_context(|| "hash merged verifying key")?;
+    catalog::upsert_vk_entry(merged_vk_id, merged_vk_bytes, Some(merged_vk_id));
+    Ok((proof.0, merged_vk_id))
 }
 
-pub fn merge_batch_h2_by_name(
-    left_name: &str,
-    left_proof: &[u8],
-    right_name: &str,
-    right_proof: &[u8],
-) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let left =
-        get_circuit(left_name).ok_or_else(|| anyhow::anyhow!("left circuit not initialized"))?;
-    let right =
-        get_circuit(right_name).ok_or_else(|| anyhow::anyhow!("right circuit not initialized"))?;
-    let left_vk = if left.vk.is_empty() {
-        get_vk_bytes(left_name)?
-    } else {
-        left.vk
-    };
-    let right_vk = if right.vk.is_empty() {
-        get_vk_bytes(right_name)?
-    } else {
-        right.vk
-    };
-    let (proof, vk) = batch_merge_h2(left_proof, &left_vk, right_proof, &right_vk)?;
-    Ok((proof.0, vk.0))
-}
-
-pub fn merge_batch_h2(
-    left_proof: &[u8],
-    left_vk: &[u8],
-    right_proof: &[u8],
-    right_vk: &[u8],
-) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
-    let (proof, vk) = batch_merge_h2(left_proof, left_vk, right_proof, right_vk)?;
-    Ok((proof.0, vk.0))
+pub fn fetch_batch_public_inputs(proof: &[u8], vk_id: [u8; 32]) -> anyhow::Result<Vec<[u8; 32]>> {
+    ensure_crs();
+    let vk_bytes = get_vk_bytes_by_id(vk_id)?;
+    let raw_inputs = mega_public_inputs(proof, &vk_bytes).with_context(|| {
+        format!(
+            "fetch public inputs with verifying key id {}",
+            format_key_id(&vk_id)
+        )
+    })?;
+    anyhow::ensure!(
+        raw_inputs.len() % 32 == 0,
+        "public inputs length {} not a multiple of 32 bytes",
+        raw_inputs.len()
+    );
+    let mut inputs = Vec::with_capacity(raw_inputs.len() / 32);
+    for chunk in raw_inputs.chunks(32) {
+        let mut elem = [0u8; 32];
+        elem.copy_from_slice(chunk);
+        inputs.push(elem);
+    }
+    Ok(inputs)
 }
 
 pub fn init_default_circuits() -> anyhow::Result<()> {
